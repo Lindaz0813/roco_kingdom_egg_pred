@@ -139,7 +139,7 @@
 
     <!-- Observation Log -->
     <div class="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-2xl p-6 shadow-xl">
-      <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center justify-between mb-3">
         <h2 class="text-lg font-semibold text-slate-200">孵化记录</h2>
         <button
           onclick="loadObservations()"
@@ -148,6 +148,16 @@
           刷新
         </button>
       </div>
+      <input
+        id="obs-search"
+        type="text"
+        placeholder="搜索精灵名…"
+        autocomplete="off"
+        oninput="filterObservations(this.value)"
+        class="w-full bg-slate-900/60 border border-slate-600 rounded-xl px-3 py-2 text-sm mb-3
+               focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500
+               placeholder-slate-600 transition"
+      />
       <div id="obs-list" class="space-y-2 max-h-64 overflow-y-auto pr-1">
         <p class="text-slate-500 text-sm text-center py-4">加载中…</p>
       </div>
@@ -319,12 +329,15 @@
       document.getElementById('pokemon-dropdown').classList.add('hidden');
     }
 
-    // Close dropdown when clicking outside
+    // Close dropdown when clicking outside or scrolling
     document.addEventListener('click', e => {
       if (!document.getElementById('pokemon-combobox').contains(e.target)) {
         document.getElementById('pokemon-dropdown').classList.add('hidden');
       }
     });
+    window.addEventListener('scroll', () => {
+      document.getElementById('pokemon-dropdown').classList.add('hidden');
+    }, { passive: true });
 
     async function doConfirm() {
       const input = document.getElementById('confirm-pokemon-input');
@@ -408,22 +421,15 @@
       setTimeout(() => el.classList.add('hidden'), 4000);
     }
 
-    async function loadObservations() {
-      const resp = await fetch('/observations');
-      const data = await resp.json();
+    let allObservations = [];
+
+    function renderObsList(obs) {
       const list = document.getElementById('obs-list');
-      const summary = document.getElementById('obs-summary');
-
-      summary.textContent = `共 ${data.total} 条记录`;
-
-      if (!data.observations || data.observations.length === 0) {
+      if (!obs || obs.length === 0) {
         list.innerHTML = '<p class="text-slate-500 text-sm text-center py-4">暂无记录</p>';
         return;
       }
-
-      const obs = data.observations; // already newest-first from server
       list.innerHTML = obs.map((o) => {
-        const idx = o.id;
         const dt = new Date(o.timestamp).toLocaleString('zh-CN', {
           month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
         });
@@ -436,7 +442,7 @@
             <div class="flex items-center gap-2">
               <span class="text-slate-600 text-xs">${dt}</span>
               <button
-                onclick="deleteObs(${idx})"
+                onclick="deleteObs(${o.id})"
                 class="text-slate-600 hover:text-red-400 transition text-xs px-1"
                 title="删除"
               >✕</button>
@@ -444,6 +450,27 @@
           </div>
         `;
       }).join('');
+    }
+
+    function filterObservations(query) {
+      const q = query.trim();
+      const filtered = q
+        ? allObservations.filter(o => o.pokemon.includes(q))
+        : allObservations;
+      renderObsList(filtered);
+    }
+
+    async function loadObservations() {
+      const resp = await fetch('/observations');
+      const data = await resp.json();
+      const summary = document.getElementById('obs-summary');
+
+      summary.textContent = `共 ${data.total} 条记录`;
+      allObservations = data.observations || [];
+
+      // Re-apply current search query if any
+      const query = document.getElementById('obs-search').value;
+      filterObservations(query);
     }
 
     async function deleteObs(idx) {
