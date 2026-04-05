@@ -22,16 +22,16 @@ make dashboard
 
 ### The Egg-to-Pokemon Size Relationship
 
-When a pokemon hatches, its size and weight are approximately **2.4× to 2.8×** the egg's measurements, with a ±0.03 M/KG leniency applied to both edges:
+When a pokemon hatches, its size and weight are related to the egg's measurements by a multiplier, with a ±0.03 M/KG leniency applied to both edges:
 
 ```
-pokemon_size   ≈ egg_size   × [2.4 … 2.8]  (±0.03 tolerance)
-pokemon_weight ≈ egg_weight × [2.4 … 2.8]  (±0.03 tolerance)
+pokemon_size   ≈ egg_size   × [2.2 … 3.5]  (±0.03 tolerance)
+pokemon_weight ≈ egg_weight × [1.9 … 3.5]  (±0.03 tolerance)
 ```
 
 So given an egg with size `S` and weight `W`, the effective search range is:
-- **Size range:** `[S×2.4 − 0.03,  S×2.8 + 0.03]`
-- **Weight range:** `[W×2.4 − 0.03, W×2.8 + 0.03]`
+- **Size range:** `[S×2.2 − 0.03,  S×3.5 + 0.03]`
+- **Weight range:** `[W×1.9 − 0.03, W×3.5 + 0.03]`
 
 ### Prediction Algorithm
 
@@ -47,7 +47,7 @@ ratio = overlap_length / (exp_max - exp_min)
 
 **Step 2 — Gaussian fit (40% weight)**
 
-How well does the expected center (`egg_stat × 2.6`) land inside the pokemon's range?
+How well does the expected center (`egg_size × 2.85` / `egg_weight × 2.7`) land inside the pokemon's range?
 ```
 center = (poke_min + poke_max) / 2
 sigma  = (poke_max - poke_min) × 0.5

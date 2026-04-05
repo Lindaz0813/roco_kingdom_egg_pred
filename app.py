@@ -122,8 +122,8 @@ def predict_route():
         "results": results,
         "egg_size": egg_size,
         "egg_weight": egg_weight,
-        "expected_size_range":   f"{egg_size   * 2.4 - 0.03:.2f}~{egg_size   * 3.5 + 0.03:.2f}M",
-        "expected_weight_range": f"{egg_weight * 2.4 - 0.03:.2f}~{egg_weight * 3.5 + 0.03:.2f}KG",
+        "expected_size_range":   f"{egg_size   * 2.2 - 0.03:.2f}~{egg_size   * 3.5 + 0.03:.2f}M",
+        "expected_weight_range": f"{egg_weight * 1.9 - 0.03:.2f}~{egg_weight * 3.5 + 0.03:.2f}KG",
     })
 
 
@@ -211,4 +211,5 @@ if __name__ == "__main__":
         hatchable = [p for p in data if p.get("is_hatchable", True)]
         print(f"Loaded {len(data)} pokemon ({len(hatchable)} hatchable)")
     print("Starting server at http://127.0.0.1:5000\n")
-    app.run(debug=False, host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5001))
+    app.run(debug=False, host="0.0.0.0", port=port)

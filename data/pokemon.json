@@ -756,7 +756,7 @@
     "size_max": 2.51,
     "weight_min": 167.0,
     "weight_max": 191.0,
-    "is_hatchable": true,
+    "is_hatchable": false,
     "id": 65
   },
   {

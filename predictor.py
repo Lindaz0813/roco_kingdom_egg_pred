@@ -17,9 +17,11 @@ Scoring:
 
 import math
 
-MULT_MIN  = 2.4
-MULT_MAX  = 3.5
-MULT_MID  = (MULT_MIN + MULT_MAX) / 2   # 2.95
+SIZE_MULT_MIN   = 2.2
+WEIGHT_MULT_MIN = 1.9
+MULT_MAX        = 3.5
+SIZE_MULT_MID   = (SIZE_MULT_MIN   + MULT_MAX) / 2   # 2.85
+WEIGHT_MULT_MID = (WEIGHT_MULT_MIN + MULT_MAX) / 2   # 2.7
 TOLERANCE = 0.03  # ±0.03 M/KG leniency on each edge of the expected range
 
 # How much a single perfect local observation multiplies the base score
@@ -55,12 +57,12 @@ def predict(
     # ------------------------------------------------------------------ #
     # 1. Expected stat ranges
     # ------------------------------------------------------------------ #
-    exp_size_min    = egg_size   * MULT_MIN - TOLERANCE
-    exp_size_max    = egg_size   * MULT_MAX + TOLERANCE
-    exp_weight_min  = egg_weight * MULT_MIN - TOLERANCE
-    exp_weight_max  = egg_weight * MULT_MAX + TOLERANCE
-    exp_size_center = egg_size   * MULT_MID
-    exp_wt_center   = egg_weight * MULT_MID
+    exp_size_min    = egg_size   * SIZE_MULT_MIN   - TOLERANCE
+    exp_size_max    = egg_size   * MULT_MAX        + TOLERANCE
+    exp_weight_min  = egg_weight * WEIGHT_MULT_MIN - TOLERANCE
+    exp_weight_max  = egg_weight * MULT_MAX        + TOLERANCE
+    exp_size_center = egg_size   * SIZE_MULT_MID
+    exp_wt_center   = egg_weight * WEIGHT_MULT_MID
 
     hatchable = [p for p in pokemon_data if p.get("is_hatchable", True)]
 

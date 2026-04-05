@@ -336,7 +336,14 @@
       }
     });
     window.addEventListener('scroll', () => {
-      document.getElementById('pokemon-dropdown').classList.add('hidden');
+      const dropdown = document.getElementById('pokemon-dropdown');
+      if (!dropdown.classList.contains('hidden')) {
+        const input = document.getElementById('confirm-pokemon-input');
+        const rect = input.getBoundingClientRect();
+        dropdown.style.top   = (rect.bottom + 4) + 'px';
+        dropdown.style.left  = rect.left + 'px';
+        dropdown.style.width = rect.width + 'px';
+      }
     }, { passive: true });
 
     async function doConfirm() {
