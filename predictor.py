@@ -18,8 +18,8 @@ Scoring:
 import math
 
 MULT_MIN  = 2.4
-MULT_MAX  = 2.8
-MULT_MID  = (MULT_MIN + MULT_MAX) / 2   # 2.6
+MULT_MAX  = 3.5
+MULT_MID  = (MULT_MIN + MULT_MAX) / 2   # 2.95
 TOLERANCE = 0.03  # ±0.03 M/KG leniency on each edge of the expected range
 
 # How much a single perfect local observation multiplies the base score
