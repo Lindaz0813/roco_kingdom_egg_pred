@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roco Kingdom 蛋孵化预测</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .prob-bar {
+      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .fade-in {
+      animation: fadeIn 0.3s ease-in-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .rank-1 { background: linear-gradient(135deg, #fbbf24, #f59e0b); }
+    .rank-2 { background: linear-gradient(135deg, #9ca3af, #6b7280); }
+    .rank-3 { background: linear-gradient(135deg, #b45309, #92400e); }
+    .rank-other { background: linear-gradient(135deg, #6366f1, #4f46e5); }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { opacity: 1; }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900 text-slate-100">
+
+  <!-- Pokemon search dropdown — rendered at body level to escape stacking contexts -->
+  <ul id="pokemon-dropdown"
+      class="hidden fixed bg-slate-800 border border-slate-600 rounded-xl shadow-2xl
+             max-h-52 overflow-y-auto"
+      style="z-index:9999"></ul>
+
+  <div class="max-w-3xl mx-auto px-4 py-10">
+
+    <!-- Header -->
+    <div class="text-center mb-10">
+      <h1 class="text-4xl font-bold bg-gradient-to-r from-purple-300 to-pink-300 bg-clip-text text-transparent mb-2">
+        🥚 Roco Kingdom 蛋孵化预测
+      </h1>
+      <p class="text-slate-400 text-sm">输入蛋的尺寸和体重，预测可能孵出的精灵</p>
+      {% if not has_data %}
+      <div class="mt-4 bg-yellow-900/40 border border-yellow-600/50 rounded-xl px-4 py-3 text-yellow-300 text-sm">
+        ⚠️ 尚未加载精灵数据。请先运行 <code class="bg-black/30 px-1 rounded">python scraper.py</code> 抓取 wiki 数据。
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Input Card -->
+    <div class="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-2xl p-6 mb-6 shadow-xl">
+      <h2 class="text-lg font-semibold mb-5 text-slate-200">蛋的参数</h2>
+      <div class="grid grid-cols-2 gap-4 mb-6">
+        <div>
+          <label class="block text-sm text-slate-400 mb-1">体型 (M)</label>
+          <input
+            id="egg-size"
+            type="number"
+            step="0.01"
+            min="0.01"
+            placeholder="例: 0.25"
+            class="w-full bg-slate-900/60 border border-slate-600 rounded-xl px-4 py-3 text-lg font-mono
+                   focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500
+                   placeholder-slate-600 transition"
+          />
+        </div>
+        <div>
+          <label class="block text-sm text-slate-400 mb-1">体重 (KG)</label>
+          <input
+            id="egg-weight"
+            type="number"
+            step="0.01"
+            min="0.01"
+            placeholder="例: 2.3"
+            class="w-full bg-slate-900/60 border border-slate-600 rounded-xl px-4 py-3 text-lg font-mono
+                   focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500
+                   placeholder-slate-600 transition"
+          />
+        </div>
+      </div>
+
+      <button
+        id="predict-btn"
+        onclick="doPrediction()"
+        class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500
+               text-white font-semibold py-3 rounded-xl transition-all duration-200 shadow-lg
+               active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        预测孵化结果
+      </button>
+    </div>
+
+    <!-- Results -->
+    <div id="results-section" class="hidden mb-6">
+      <div class="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-2xl p-6 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold text-slate-200">预测结果</h2>
+          <div id="exp-ranges" class="text-xs text-slate-500 text-right"></div>
+        </div>
+        <div id="results-list" class="space-y-3"></div>
+        <div id="no-results" class="hidden text-center text-slate-500 py-6">
+          未找到匹配的精灵。请检查数值是否正确。
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirm Hatch Card -->
+    <div id="confirm-section" class="hidden mb-6">
+      <div class="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-2xl p-6 shadow-xl">
+        <h2 class="text-lg font-semibold mb-4 text-slate-200">确认孵化结果 <span class="text-sm font-normal text-slate-400">（提高未来预测准确率）</span></h2>
+        <div class="flex gap-3">
+          <div class="flex-1" id="pokemon-combobox">
+            <label class="block text-sm text-slate-400 mb-1">孵出的精灵</label>
+            <input
+              id="confirm-pokemon-input"
+              type="text"
+              autocomplete="off"
+              placeholder="输入或选择精灵名…"
+              class="w-full bg-slate-900/60 border border-slate-600 rounded-xl px-4 py-2.5
+                     focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500
+                     placeholder-slate-600 transition"
+              oninput="filterPokemon(this.value)"
+              onfocus="filterPokemon(this.value)"
+            />
+          </div>
+          <div class="flex items-end">
+            <button
+              onclick="doConfirm()"
+              class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-5 py-2.5 rounded-xl
+                     transition-all duration-200 active:scale-95 whitespace-nowrap"
+            >
+              ✓ 记录
+            </button>
+          </div>
+        </div>
+        <div id="confirm-feedback" class="mt-3 text-sm hidden"></div>
+      </div>
+    </div>
+
+    <!-- Observation Log -->
+    <div class="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-2xl p-6 shadow-xl">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-slate-200">孵化记录</h2>
+        <button
+          onclick="loadObservations()"
+          class="text-xs text-slate-400 hover:text-slate-200 transition"
+        >
+          刷新
+        </button>
+      </div>
+      <div id="obs-list" class="space-y-2 max-h-64 overflow-y-auto pr-1">
+        <p class="text-slate-500 text-sm text-center py-4">加载中…</p>
+      </div>
+      <div id="obs-summary" class="mt-3 text-xs text-slate-500 text-right"></div>
+    </div>
+
+  </div>
+
+  <script>
+    let currentEggSize = null;
+    let currentEggWeight = null;
+    let confirmedThisQuery = false;
+
+    async function doPrediction() {
+      const sizeEl = document.getElementById('egg-size');
+      const weightEl = document.getElementById('egg-weight');
+      const size = parseFloat(sizeEl.value);
+      const weight = parseFloat(weightEl.value);
+
+      if (!size || !weight || size <= 0 || weight <= 0) {
+        showInputError('请输入有效的体型和体重');
+        return;
+      }
+
+      currentEggSize = size;
+      currentEggWeight = weight;
+      confirmedThisQuery = false;
+
+      const btn = document.getElementById('predict-btn');
+      btn.disabled = true;
+      btn.textContent = '预测中…';
+
+      try {
+        const resp = await fetch('/predict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ size, weight }),
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          showError(data.error || '预测失败');
+          return;
+        }
+
+        renderResults(data);
+        document.getElementById('confirm-section').classList.remove('hidden');
+      } catch (e) {
+        showError('网络错误: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '预测孵化结果';
+      }
+    }
+
+    function renderResults(data) {
+      const section = document.getElementById('results-section');
+      const list = document.getElementById('results-list');
+      const noResults = document.getElementById('no-results');
+      const expRanges = document.getElementById('exp-ranges');
+
+      section.classList.remove('hidden');
+      expRanges.innerHTML = `预期精灵体型 ${data.expected_size_range}<br>预期精灵体重 ${data.expected_weight_range}`;
+
+      if (!data.results || data.results.length === 0) {
+        list.innerHTML = '';
+        noResults.classList.remove('hidden');
+        return;
+      }
+
+      noResults.classList.add('hidden');
+
+      const rankClasses = ['rank-1', 'rank-2', 'rank-3'];
+
+      list.innerHTML = data.results.map((r, i) => {
+        const rankCls = i < 3 ? rankClasses[i] : 'rank-other';
+        const confirmedBadge = r.confirmed_count > 0
+          ? `<span class="ml-2 text-xs bg-emerald-800/60 text-emerald-300 px-2 py-0.5 rounded-full">✓ ${r.confirmed_count}次确认</span>`
+          : '';
+        const probWidth = Math.max(r.probability, 2);
+
+        return `
+          <div class="fade-in bg-slate-900/40 rounded-xl p-4 border border-slate-700/30">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2">
+                <span class="w-6 h-6 rounded-full ${rankCls} flex items-center justify-center text-xs font-bold text-white shadow">
+                  ${i + 1}
+                </span>
+                <span class="font-semibold text-slate-100 text-lg">${r.name}</span>
+                ${confirmedBadge}
+              </div>
+              <div class="flex items-center gap-3">
+                <span class="text-2xl font-bold text-purple-300">${r.probability}%</span>
+                <button
+                  onclick="confirmFromCard('${r.name.replace(/'/g, "\\'")}')"
+                  data-name="${r.name.replace(/"/g, '&quot;')}"
+                  class="confirm-card-btn text-xs bg-emerald-700/50 hover:bg-emerald-600 text-emerald-300 hover:text-white
+                         px-2.5 py-1 rounded-lg transition-all duration-150 active:scale-95 whitespace-nowrap"
+                  title="记录为孵化结果"
+                >✓ 就是它</button>
+              </div>
+            </div>
+            <div class="w-full bg-slate-700/50 rounded-full h-2 mb-2">
+              <div class="prob-bar h-2 rounded-full bg-gradient-to-r from-purple-500 to-pink-500"
+                   style="width: ${probWidth}%"></div>
+            </div>
+            <div class="flex gap-4 text-xs text-slate-500">
+              <span>📏 体型 ${r.size_range}</span>
+              <span>⚖️ 体重 ${r.weight_range}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // --- Pokemon combobox ---
+    const ALL_POKEMON = [{% for p in hatchable_pokemon %}"{{ p }}",{% endfor %}];
+    let selectedPokemon = '';
+
+    function filterPokemon(query) {
+      const input = document.getElementById('confirm-pokemon-input');
+      const dropdown = document.getElementById('pokemon-dropdown');
+      const q = query.trim();
+      const matches = q
+        ? ALL_POKEMON.filter(p => p.includes(q))
+        : ALL_POKEMON;
+
+      if (matches.length === 0) {
+        dropdown.classList.add('hidden');
+        return;
+      }
+
+      // Position dropdown directly below the input using fixed coords
+      const rect = input.getBoundingClientRect();
+      dropdown.style.top    = (rect.bottom + 4) + 'px';
+      dropdown.style.left   = rect.left + 'px';
+      dropdown.style.width  = rect.width + 'px';
+
+      dropdown.innerHTML = matches.map(p => `
+        <li
+          class="px-4 py-2 cursor-pointer hover:bg-slate-700 text-slate-200 text-sm transition"
+          onmousedown="selectPokemon('${p.replace(/'/g, "\\'")}')"
+        >${p}</li>
+      `).join('');
+      dropdown.classList.remove('hidden');
+    }
+
+    function selectPokemon(name) {
+      selectedPokemon = name;
+      document.getElementById('confirm-pokemon-input').value = name;
+      document.getElementById('pokemon-dropdown').classList.add('hidden');
+    }
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', e => {
+      if (!document.getElementById('pokemon-combobox').contains(e.target)) {
+        document.getElementById('pokemon-dropdown').classList.add('hidden');
+      }
+    });
+
+    async function doConfirm() {
+      const input = document.getElementById('confirm-pokemon-input');
+      const pokemon = input.value.trim();
+      if (!pokemon) {
+        showConfirmFeedback('请选择精灵', 'error');
+        return;
+      }
+      if (!currentEggSize || !currentEggWeight) {
+        showConfirmFeedback('请先进行预测', 'error');
+        return;
+      }
+
+      try {
+        const resp = await fetch('/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ size: currentEggSize, weight: currentEggWeight, pokemon }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          showConfirmFeedback(`✓ 已记录：${pokemon}（共 ${data.total} 条记录）`, 'success');
+          input.value = '';
+          selectedPokemon = '';
+          loadObservations();
+          // Refresh prediction with new data
+          setTimeout(doPrediction, 300);
+        } else {
+          showConfirmFeedback(data.error || '记录失败', 'error');
+        }
+      } catch (e) {
+        showConfirmFeedback('网络错误', 'error');
+      }
+    }
+
+    function lockConfirmButtons(chosenName) {
+      confirmedThisQuery = true;
+      document.querySelectorAll('.confirm-card-btn').forEach(btn => {
+        const isChosen = btn.dataset.name === chosenName;
+        btn.disabled = true;
+        if (isChosen) {
+          btn.textContent = '✓ 已记录';
+          btn.className = btn.className.replace(/bg-emerald-700\/50 hover:bg-emerald-600 text-emerald-300 hover:text-white/, 'bg-emerald-700 text-emerald-200 opacity-80');
+        } else {
+          btn.classList.add('opacity-30', 'cursor-not-allowed');
+        }
+      });
+    }
+
+    async function confirmFromCard(pokemonName) {
+      if (!currentEggSize || !currentEggWeight || confirmedThisQuery) return;
+      try {
+        const resp = await fetch('/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ size: currentEggSize, weight: currentEggWeight, pokemon: pokemonName }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          lockConfirmButtons(pokemonName);
+          showConfirmFeedback(`✓ 已记录：${pokemonName}（共 ${data.total} 条记录）`, 'success');
+          document.getElementById('confirm-section').classList.remove('hidden');
+          loadObservations();
+          setTimeout(doPrediction, 300);
+        } else {
+          showConfirmFeedback(data.error || '记录失败', 'error');
+        }
+      } catch (e) {
+        showConfirmFeedback('网络错误', 'error');
+      }
+    }
+
+    function showConfirmFeedback(msg, type) {
+      const el = document.getElementById('confirm-feedback');
+      el.classList.remove('hidden', 'text-emerald-400', 'text-red-400');
+      el.classList.add(type === 'success' ? 'text-emerald-400' : 'text-red-400');
+      el.textContent = msg;
+      setTimeout(() => el.classList.add('hidden'), 4000);
+    }
+
+    async function loadObservations() {
+      const resp = await fetch('/observations');
+      const data = await resp.json();
+      const list = document.getElementById('obs-list');
+      const summary = document.getElementById('obs-summary');
+
+      summary.textContent = `共 ${data.total} 条记录`;
+
+      if (!data.observations || data.observations.length === 0) {
+        list.innerHTML = '<p class="text-slate-500 text-sm text-center py-4">暂无记录</p>';
+        return;
+      }
+
+      const obs = data.observations; // already newest-first from server
+      list.innerHTML = obs.map((o) => {
+        const idx = o.id;
+        const dt = new Date(o.timestamp).toLocaleString('zh-CN', {
+          month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+        });
+        return `
+          <div class="flex items-center justify-between text-sm bg-slate-900/30 rounded-lg px-3 py-2">
+            <div class="flex items-center gap-3">
+              <span class="text-purple-300 font-medium">${o.pokemon}</span>
+              <span class="text-slate-500 font-mono text-xs">${o.egg_size}M / ${o.egg_weight}KG</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-slate-600 text-xs">${dt}</span>
+              <button
+                onclick="deleteObs(${idx})"
+                class="text-slate-600 hover:text-red-400 transition text-xs px-1"
+                title="删除"
+              >✕</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function deleteObs(idx) {
+      await fetch(`/observations/${idx}`, { method: 'DELETE' });
+      loadObservations();
+    }
+
+    function showError(msg) {
+      alert('错误: ' + msg);
+    }
+
+    function showInputError(msg) {
+      const size = document.getElementById('egg-size');
+      const weight = document.getElementById('egg-weight');
+      [size, weight].forEach(el => {
+        el.classList.add('border-red-500');
+        setTimeout(() => el.classList.remove('border-red-500'), 2000);
+      });
+    }
+
+    // Allow Enter key to trigger prediction
+    ['egg-size', 'egg-weight'].forEach(id => {
+      document.getElementById(id).addEventListener('keydown', e => {
+        if (e.key === 'Enter') doPrediction();
+      });
+    });
+
+    // Load observations on page load
+    loadObservations();
+  </script>
+</body>
+</html>

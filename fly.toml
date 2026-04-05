@@ -1,0 +1,31 @@
+# fly.toml app configuration file generated for roco-kingdom-egg-pred on 2026-04-04T22:27:29-07:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'roco-kingdom-egg-pred'
+primary_region = 'sjc'
+
+[env]
+  DB_PATH = "/data/observations.db"
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+# Persistent volume — observations.db lives here, survives redeploys
+# Create once with: fly volumes create data_vol --size 1 --region sjc
+[[mounts]]
+  source      = "data_vol"
+  destination = "/data"
