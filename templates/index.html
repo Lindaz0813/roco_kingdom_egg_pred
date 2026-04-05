@@ -456,7 +456,7 @@
       const q = query.trim();
       const filtered = q
         ? allObservations.filter(o => o.pokemon.includes(q))
-        : allObservations;
+        : allObservations.slice(0, 50);   // unfiltered: show newest 50 only
       renderObsList(filtered);
     }
 

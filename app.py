@@ -157,7 +157,7 @@ def confirm():
 def get_observations():
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT id, egg_size, egg_weight, pokemon, timestamp FROM observations ORDER BY id DESC LIMIT 50"
+            "SELECT id, egg_size, egg_weight, pokemon, timestamp FROM observations ORDER BY id DESC"
         ).fetchall()
         total = conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
     return jsonify({"observations": [dict(r) for r in rows], "total": total})
