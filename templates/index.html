@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Roco Kingdom 蛋孵化预测</title>
+  <title>洛克王国 蛋孵化预测</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .prob-bar {
@@ -161,6 +161,17 @@
     let currentEggWeight = null;
     let confirmedThisQuery = false;
 
+    // --- localStorage helpers for confirmed eggs ---
+    function confirmedKey(size, weight) {
+      return `confirmed_${size}_${weight}`;
+    }
+    function markEggConfirmed(size, weight, pokemon) {
+      localStorage.setItem(confirmedKey(size, weight), pokemon);
+    }
+    function getConfirmedPokemon(size, weight) {
+      return localStorage.getItem(confirmedKey(size, weight));
+    }
+
     async function doPrediction() {
       const sizeEl = document.getElementById('egg-size');
       const weightEl = document.getElementById('egg-weight');
@@ -174,7 +185,7 @@
 
       currentEggSize = size;
       currentEggWeight = weight;
-      confirmedThisQuery = false;
+      confirmedThisQuery = !!getConfirmedPokemon(size, weight);
 
       const btn = document.getElementById('predict-btn');
       btn.disabled = true;
@@ -222,8 +233,10 @@
 
       const rankClasses = ['rank-1', 'rank-2', 'rank-3'];
 
+      const alreadyConfirmed = getConfirmedPokemon(data.egg_size ?? currentEggSize, data.egg_weight ?? currentEggWeight);
+
       list.innerHTML = data.results.map((r, i) => {
-        const rankCls = i < 3 ? rankClasses[i] : 'rank-other';
+        const rankCls  = i < 3 ? rankClasses[i] : 'rank-other';
         const confirmedBadge = r.confirmed_count > 0
           ? `<span class="ml-2 text-xs bg-emerald-800/60 text-emerald-300 px-2 py-0.5 rounded-full">✓ ${r.confirmed_count}次确认</span>`
           : '';
@@ -261,6 +274,11 @@
           </div>
         `;
       }).join('');
+
+      // Restore locked state if this egg was already confirmed in a previous session
+      if (alreadyConfirmed) {
+        lockConfirmButtons(alreadyConfirmed);
+      }
     }
 
     // --- Pokemon combobox ---
@@ -328,6 +346,8 @@
         });
         const data = await resp.json();
         if (resp.ok) {
+          markEggConfirmed(currentEggSize, currentEggWeight, pokemon);
+          lockConfirmButtons(pokemon);
           showConfirmFeedback(`✓ 已记录：${pokemon}（共 ${data.total} 条记录）`, 'success');
           input.value = '';
           selectedPokemon = '';
@@ -344,6 +364,7 @@
 
     function lockConfirmButtons(chosenName) {
       confirmedThisQuery = true;
+      markEggConfirmed(currentEggSize, currentEggWeight, chosenName);
       document.querySelectorAll('.confirm-card-btn').forEach(btn => {
         const isChosen = btn.dataset.name === chosenName;
         btn.disabled = true;

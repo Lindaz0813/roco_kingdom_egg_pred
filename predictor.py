@@ -1,157 +1,156 @@
 """
 Egg hatch prediction algorithm.
 
-Rule: pokemon_stat ≈ egg_stat × multiplier, where multiplier ∈ [2.5, 2.75]
-So for a given egg, the expected pokemon size is in [egg_size×2.5, egg_size×2.75]
-and similarly for weight.
+Rule: pokemon_stat ≈ egg_stat × multiplier, where multiplier ∈ [2.4, 2.8] (±0.03 tolerance)
 
-Scoring uses overlap ratio between the expected range and each pokemon's stat range,
-then applies a Bayesian-style boost from user-confirmed observations.
+Scoring:
+  1. Overlap ratio between expected range and pokemon's stat range (60%)
+  2. Gaussian fit of the expected center within the pokemon's range (40%)
+  3. Observation boost — two layers:
+     a. LOCAL boost: confirmed observations for similar eggs (within 20% tolerance)
+        — weighted by closeness, multiplied into the base score with high gain
+     b. GLOBAL prior: total confirmation count across all eggs
+        — gives a small lift to frequently-confirmed pokemon
+     Confirmed pokemon that have zero base overlap are still injected at a
+     meaningful minimum score so they always appear in results.
 """
 
 import math
 
-MULT_MIN = 2.4
-MULT_MAX = 2.8
-MULT_MID = (MULT_MIN + MULT_MAX) / 2  # 2.6
-TOLERANCE = 0.03  # ±0.03 M/KG leniency applied to both edges of the expected range
+MULT_MIN  = 2.4
+MULT_MAX  = 2.8
+MULT_MID  = (MULT_MIN + MULT_MAX) / 2   # 2.6
+TOLERANCE = 0.03  # ±0.03 M/KG leniency on each edge of the expected range
+
+# How much a single perfect local observation multiplies the base score
+LOCAL_BOOST_GAIN   = 5.0   # score *= (1 + accumulated * LOCAL_BOOST_GAIN)
+# Small lift per global confirmation (independent of egg similarity)
+GLOBAL_BOOST_GAIN  = 0.3   # score *= (1 + count * GLOBAL_BOOST_GAIN)
+# Similarity window for local observations (fraction of egg stat)
+SIM_TOLERANCE      = 0.20  # 20%
 
 
 def overlap(a_min: float, a_max: float, b_min: float, b_max: float) -> float:
-    """Length of overlap between two intervals."""
     return max(0.0, min(a_max, b_max) - max(a_min, b_min))
 
 
-def gaussian_score(value: float, range_min: float, range_max: float, sigma_factor: float = 0.5) -> float:
-    """
-    Score how well `value` (the predicted center) fits within [range_min, range_max].
-    Returns 1.0 if the center is inside the range, decays with distance outside.
-    sigma is proportional to the range width.
-    """
+def gaussian_score(value: float, range_min: float, range_max: float,
+                   sigma_factor: float = 0.5) -> float:
     center = (range_min + range_max) / 2
-    width = range_max - range_min
-    sigma = max(width * sigma_factor, 0.01)
-
+    width  = range_max - range_min
+    sigma  = max(width * sigma_factor, 0.01)
     if range_min <= value <= range_max:
-        # Inside — score based on proximity to range center
         return math.exp(-0.5 * ((value - center) / sigma) ** 2)
-    else:
-        # Outside — distance-based penalty
-        dist = min(abs(value - range_min), abs(value - range_max))
-        return math.exp(-0.5 * (dist / sigma) ** 2)
+    dist = min(abs(value - range_min), abs(value - range_max))
+    return math.exp(-0.5 * (dist / sigma) ** 2)
 
 
 def predict(
     egg_size: float,
     egg_weight: float,
-    pokemon_data: list[dict],
-    observations: list[dict],
+    pokemon_data: list,
+    observations: list,
     top_n: int = 10,
-) -> list[dict]:
-    """
-    Predict which pokemon will hatch from an egg with the given size and weight.
-
-    Returns a list of dicts: [{name, probability, size_range, weight_range, confirmed_count}]
-    sorted by probability descending.
-    """
-    # Expected pokemon stat ranges (expanded by ±TOLERANCE on each edge)
-    exp_size_min = egg_size * MULT_MIN - TOLERANCE
-    exp_size_max = egg_size * MULT_MAX + TOLERANCE
-    exp_weight_min = egg_weight * MULT_MIN - TOLERANCE
-    exp_weight_max = egg_weight * MULT_MAX + TOLERANCE
-    exp_size_center = egg_size * MULT_MID
-    exp_weight_center = egg_weight * MULT_MID
+) -> list:
+    # ------------------------------------------------------------------ #
+    # 1. Expected stat ranges
+    # ------------------------------------------------------------------ #
+    exp_size_min    = egg_size   * MULT_MIN - TOLERANCE
+    exp_size_max    = egg_size   * MULT_MAX + TOLERANCE
+    exp_weight_min  = egg_weight * MULT_MIN - TOLERANCE
+    exp_weight_max  = egg_weight * MULT_MAX + TOLERANCE
+    exp_size_center = egg_size   * MULT_MID
+    exp_wt_center   = egg_weight * MULT_MID
 
     hatchable = [p for p in pokemon_data if p.get("is_hatchable", True)]
 
-    raw_scores: dict[str, float] = {}
+    # ------------------------------------------------------------------ #
+    # 2. Base scores from stat overlap
+    # ------------------------------------------------------------------ #
+    raw_scores: dict = {}
+
+    exp_s_span = exp_size_max   - exp_size_min
+    exp_w_span = exp_weight_max - exp_weight_min
 
     for p in hatchable:
-        s_min, s_max = p["size_min"], p["size_max"]
+        s_min, s_max = p["size_min"],   p["size_max"]
         w_min, w_max = p["weight_min"], p["weight_max"]
 
-        # Primary: overlap between expected range and pokemon range
-        s_overlap = overlap(exp_size_min, exp_size_max, s_min, s_max)
-        w_overlap = overlap(exp_weight_min, exp_weight_max, w_min, w_max)
+        s_ov = overlap(exp_size_min,   exp_size_max,   s_min, s_max)
+        w_ov = overlap(exp_weight_min, exp_weight_max, w_min, w_max)
 
-        if s_overlap <= 0 and w_overlap <= 0:
-            continue  # No match at all, skip
+        if s_ov <= 0 and w_ov <= 0:
+            continue
 
-        # Overlap ratio (0–1)
-        exp_s_span = exp_size_max - exp_size_min
-        exp_w_span = exp_weight_max - exp_weight_min
-        s_ratio = s_overlap / exp_s_span if exp_s_span > 0 else (1.0 if s_overlap > 0 else 0.0)
-        w_ratio = w_overlap / exp_w_span if exp_w_span > 0 else (1.0 if w_overlap > 0 else 0.0)
+        s_ratio = s_ov / exp_s_span if exp_s_span > 0 else (1.0 if s_ov > 0 else 0.0)
+        w_ratio = w_ov / exp_w_span if exp_w_span > 0 else (1.0 if w_ov > 0 else 0.0)
 
-        # Secondary: Gaussian score for how well the predicted center lands in range
         s_gauss = gaussian_score(exp_size_center, s_min, s_max)
-        w_gauss = gaussian_score(exp_weight_center, w_min, w_max)
+        w_gauss = gaussian_score(exp_wt_center,   w_min, w_max)
 
-        # Combined score: weight overlap ratio 60%, gaussian fit 40%
         s_score = 0.6 * s_ratio + 0.4 * s_gauss
         w_score = 0.6 * w_ratio + 0.4 * w_gauss
 
-        # Both dimensions must have some evidence
-        if s_overlap > 0 and w_overlap > 0:
-            base_score = (s_score + w_score) / 2
-        elif s_overlap > 0:
-            base_score = s_score * 0.3  # Partial match, penalise heavily
-        elif w_overlap > 0:
-            base_score = w_score * 0.3
+        if s_ov > 0 and w_ov > 0:
+            base = (s_score + w_score) / 2
+        elif s_ov > 0:
+            base = s_score * 0.3
         else:
-            continue
+            base = w_score * 0.3
 
-        raw_scores[p["name"]] = base_score
+        raw_scores[p["name"]] = base
 
-    # --- Learning boost from confirmed observations ---
-    # Count how many times each pokemon was confirmed for similar eggs
-    confirmation_boosts: dict[str, float] = {}
+    # ------------------------------------------------------------------ #
+    # 3. Observation boosts
+    # ------------------------------------------------------------------ #
+    size_tol   = egg_size   * SIM_TOLERANCE
+    weight_tol = egg_weight * SIM_TOLERANCE
+
+    # 3a. Local boost — similar eggs only
+    local_boosts:  dict = {}
+    # 3b. Global prior — all confirmations
+    global_counts: dict = {}
 
     for obs in observations:
-        obs_size = obs.get("egg_size", 0)
-        obs_weight = obs.get("egg_weight", 0)
-        obs_pokemon = obs.get("pokemon", "")
-
-        if not obs_pokemon:
+        name = obs.get("pokemon", "")
+        if not name:
             continue
 
-        # Similarity: use relative tolerance (15% of egg stat)
-        size_tol = egg_size * 0.15
-        weight_tol = egg_weight * 0.15
+        global_counts[name] = global_counts.get(name, 0) + 1
 
-        size_match = abs(obs_size - egg_size) <= size_tol
-        weight_match = abs(obs_weight - egg_weight) <= weight_tol
+        obs_size   = obs.get("egg_size",   0)
+        obs_weight = obs.get("egg_weight", 0)
 
-        if size_match and weight_match:
-            # Closer observations get stronger boost
-            size_closeness = 1.0 - abs(obs_size - egg_size) / (size_tol + 1e-9)
-            weight_closeness = 1.0 - abs(obs_weight - egg_weight) / (weight_tol + 1e-9)
-            boost = (size_closeness + weight_closeness) / 2  # 0–1
+        if (abs(obs_size   - egg_size)   <= size_tol and
+                abs(obs_weight - egg_weight) <= weight_tol):
+            s_close = 1.0 - abs(obs_size   - egg_size)   / (size_tol   + 1e-9)
+            w_close = 1.0 - abs(obs_weight - egg_weight) / (weight_tol + 1e-9)
+            closeness = (s_close + w_close) / 2
+            local_boosts[name] = local_boosts.get(name, 0) + closeness
 
-            confirmation_boosts[obs_pokemon] = confirmation_boosts.get(obs_pokemon, 0) + boost
+    # Find max base score so we can give confirmed-but-no-overlap entries
+    # a meaningful floor score
+    max_base = max(raw_scores.values()) if raw_scores else 1.0
 
-    # Apply boosts: multiply base score by (1 + accumulated_boost)
-    for pokemon_name, boost in confirmation_boosts.items():
-        if pokemon_name in raw_scores:
-            raw_scores[pokemon_name] *= (1 + boost)
+    # Apply local boost
+    for name, boost in local_boosts.items():
+        if name in raw_scores:
+            raw_scores[name] *= (1 + boost * LOCAL_BOOST_GAIN)
         else:
-            # Pokemon not in base results but was confirmed — add it with minimum score
-            # Find it in the hatchable list to get its ranges
-            p = next((p for p in hatchable if p["name"] == pokemon_name), None)
-            if p:
-                raw_scores[pokemon_name] = boost * 0.1
+            # Confirmed for a similar egg but no stat overlap — inject at floor
+            raw_scores[name] = max_base * 0.4 * min(boost, 1.0)
+
+    # Apply global prior (only to pokemon already in the result set)
+    for name, count in global_counts.items():
+        if name in raw_scores:
+            raw_scores[name] *= (1 + count * GLOBAL_BOOST_GAIN)
 
     if not raw_scores:
         return []
 
-    # Count confirmed observations per pokemon for display
-    confirmed_counts: dict[str, int] = {}
-    for obs in observations:
-        obs_pokemon = obs.get("pokemon", "")
-        if obs_pokemon:
-            confirmed_counts[obs_pokemon] = confirmed_counts.get(obs_pokemon, 0) + 1
-
-    # Normalise to percentages
+    # ------------------------------------------------------------------ #
+    # 4. Normalise → percentages
+    # ------------------------------------------------------------------ #
     total = sum(raw_scores.values())
     results = []
     for p in hatchable:
@@ -162,11 +161,11 @@ def predict(
         if pct < 0.1:
             continue
         results.append({
-            "name": name,
-            "probability": pct,
-            "size_range": f"{p['size_min']}~{p['size_max']}M",
-            "weight_range": f"{p['weight_min']}~{p['weight_max']}KG",
-            "confirmed_count": confirmed_counts.get(name, 0),
+            "name":            name,
+            "probability":     pct,
+            "size_range":      f"{p['size_min']}~{p['size_max']}M",
+            "weight_range":    f"{p['weight_min']}~{p['weight_max']}KG",
+            "confirmed_count": global_counts.get(name, 0),
         })
 
     results.sort(key=lambda x: -x["probability"])
