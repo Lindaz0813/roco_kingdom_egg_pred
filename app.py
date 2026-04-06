@@ -122,8 +122,8 @@ def predict_route():
         "results": results,
         "egg_size": egg_size,
         "egg_weight": egg_weight,
-        "expected_size_range":   f"{egg_size   * 2.2 - 0.03:.2f}~{egg_size   * 3.5 + 0.03:.2f}M",
-        "expected_weight_range": f"{egg_weight * 1.9 - 0.03:.2f}~{egg_weight * 3.5 + 0.03:.2f}KG",
+        "expected_size_range":   f"{egg_size   * 2.2 - 0.03:.2f}~{egg_size   * 3.2 + 0.15:.2f}M",
+        "expected_weight_range": f"{egg_weight * 1.9 - 0.03:.2f}~{egg_weight * 3.2 + 0.15:.2f}KG",
     })
 
 

@@ -1,8 +1,6 @@
 """
 Egg hatch prediction algorithm.
 
-Rule: pokemon_stat ≈ egg_stat × multiplier, where multiplier ∈ [2.4, 2.8] (±0.03 tolerance)
-
 Scoring:
   1. Overlap ratio between expected range and pokemon's stat range (60%)
   2. Gaussian fit of the expected center within the pokemon's range (40%)
@@ -13,16 +11,21 @@ Scoring:
         — gives a small lift to frequently-confirmed pokemon
      Confirmed pokemon that have zero base overlap are still injected at a
      meaningful minimum score so they always appear in results.
+  4. Trend consistency — for pokemon with ≥2 confirmed observations, the
+     weight/size ratio of the new egg must follow the trend seen in the data.
+     If height increases, weight must increase proportionally; eggs that
+     deviate from the observed ratio distribution are penalised.
 """
 
 import math
 
 SIZE_MULT_MIN   = 2.2
 WEIGHT_MULT_MIN = 1.9
-MULT_MAX        = 3.5
-SIZE_MULT_MID   = (SIZE_MULT_MIN   + MULT_MAX) / 2   # 2.85
-WEIGHT_MULT_MID = (WEIGHT_MULT_MIN + MULT_MAX) / 2   # 2.7
-TOLERANCE = 0.03  # ±0.03 M/KG leniency on each edge of the expected range
+MULT_MAX        = 3.2
+SIZE_MULT_MID   = (SIZE_MULT_MIN   + MULT_MAX) / 2   # 2.7
+WEIGHT_MULT_MID = (WEIGHT_MULT_MIN + MULT_MAX) / 2   # 2.55
+TOLERANCE_LOW  = 0.03   # leniency on the lower edge
+TOLERANCE_HIGH = 0.15   # more lenient on the upper edge
 
 # How much a single perfect local observation multiplies the base score
 LOCAL_BOOST_GAIN   = 5.0   # score *= (1 + accumulated * LOCAL_BOOST_GAIN)
@@ -30,6 +33,38 @@ LOCAL_BOOST_GAIN   = 5.0   # score *= (1 + accumulated * LOCAL_BOOST_GAIN)
 GLOBAL_BOOST_GAIN  = 0.3   # score *= (1 + count * GLOBAL_BOOST_GAIN)
 # Similarity window for local observations (fraction of egg stat)
 SIM_TOLERANCE      = 0.20  # 20%
+
+# Trend consistency check
+TREND_MIN_OBS      = 2     # need at least this many confirmed obs to check trend
+TREND_SIGMA_FLOOR  = 0.06  # minimum sigma = 6% of mean ratio
+
+
+def ratio_trend_score(egg_size: float, egg_weight: float, obs_for_pokemon: list) -> float:
+    """
+    Returns a score in [0, 1] measuring how consistent (egg_size, egg_weight)
+    is with the weight/size ratio trend of confirmed observations.
+
+    Uses the egg_weight / egg_size ratio as a proxy for the proportional
+    relationship: if prior eggs of this pokemon all had ratio ~r, a new egg
+    with a very different ratio is unlikely to belong to this pokemon.
+
+    Returns 1.0 (no penalty) when fewer than TREND_MIN_OBS observations exist.
+    """
+    valid = [o for o in obs_for_pokemon if o.get("egg_size", 0) > 0]
+    if len(valid) < TREND_MIN_OBS:
+        return 1.0
+
+    ratios = [o["egg_weight"] / o["egg_size"] for o in valid]
+    n = len(ratios)
+    mean_r = sum(ratios) / n
+    var_r  = sum((r - mean_r) ** 2 for r in ratios) / n
+    std_r  = var_r ** 0.5
+
+    # Sigma is the observed spread but at least TREND_SIGMA_FLOOR × mean
+    sigma = max(std_r, mean_r * TREND_SIGMA_FLOOR)
+
+    new_ratio = egg_weight / egg_size
+    return math.exp(-0.5 * ((new_ratio - mean_r) / sigma) ** 2)
 
 
 def overlap(a_min: float, a_max: float, b_min: float, b_max: float) -> float:
@@ -57,10 +92,10 @@ def predict(
     # ------------------------------------------------------------------ #
     # 1. Expected stat ranges
     # ------------------------------------------------------------------ #
-    exp_size_min    = egg_size   * SIZE_MULT_MIN   - TOLERANCE
-    exp_size_max    = egg_size   * MULT_MAX        + TOLERANCE
-    exp_weight_min  = egg_weight * WEIGHT_MULT_MIN - TOLERANCE
-    exp_weight_max  = egg_weight * MULT_MAX        + TOLERANCE
+    exp_size_min    = egg_size   * SIZE_MULT_MIN   - TOLERANCE_LOW
+    exp_size_max    = egg_size   * MULT_MAX        + TOLERANCE_HIGH
+    exp_weight_min  = egg_weight * WEIGHT_MULT_MIN - TOLERANCE_LOW
+    exp_weight_max  = egg_weight * MULT_MAX        + TOLERANCE_HIGH
     exp_size_center = egg_size   * SIZE_MULT_MID
     exp_wt_center   = egg_weight * WEIGHT_MULT_MID
 
@@ -147,11 +182,25 @@ def predict(
         if name in raw_scores:
             raw_scores[name] *= (1 + count * GLOBAL_BOOST_GAIN)
 
+    # ------------------------------------------------------------------ #
+    # 4. Trend consistency — penalise pokemon whose observed ratio
+    #    distribution doesn't match this egg's weight/size ratio
+    # ------------------------------------------------------------------ #
+    obs_by_pokemon: dict = {}
+    for obs in observations:
+        name = obs.get("pokemon", "")
+        if name:
+            obs_by_pokemon.setdefault(name, []).append(obs)
+
+    for name in list(raw_scores.keys()):
+        ts = ratio_trend_score(egg_size, egg_weight, obs_by_pokemon.get(name, []))
+        raw_scores[name] *= ts
+
     if not raw_scores:
         return []
 
     # ------------------------------------------------------------------ #
-    # 4. Normalise → percentages
+    # 5. Normalise → percentages
     # ------------------------------------------------------------------ #
     total = sum(raw_scores.values())
     results = []
